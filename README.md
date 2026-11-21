@@ -2,6 +2,10 @@
 
 输入需求或文案，AI 自动生成口播语音。
 
+## 文档
+
+- [开发文档与实施计划](docs/DEVELOPMENT_PLAN.md)：架构、数据模型、API、Agent、TTS、计费、部署、里程碑和关键库详解
+
 ## 结构
 
 - `web/`：前端（Next.js）
