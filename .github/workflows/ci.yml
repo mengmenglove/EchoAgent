@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    env:
+      # uv.lock 记录的是国内镜像地址；CI 在海外，改用官方 PyPI（版本仍以 uv.lock 为准）
+      UV_DEFAULT_INDEX: https://pypi.org/simple
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: echo
+          POSTGRES_PASSWORD: echo
+          POSTGRES_DB: echo
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U echo" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+      - run: uv sync --frozen
+      - run: uv run ruff check app tests
+      - run: uv run ruff format --check app tests
+      - name: Tests (SQLite)
+        run: uv run pytest -q
+      - name: Tests (Postgres, includes concurrency test)
+        run: uv run pytest -q
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://echo:echo@localhost:5432/echo
+      - name: Migrations are in sync with models
+        run: uv run alembic upgrade head && uv run alembic check
+        env:
+          DATABASE_URL: postgresql+asyncpg://echo:echo@localhost:5432/echo
+          JWT_SECRET: ci-only-secret-0123456789-abcdefghij
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build

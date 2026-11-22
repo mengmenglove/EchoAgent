@@ -1,0 +1,16 @@
+[
+  {
+    "name": "沉稳男声",
+    "audio": "voices/calm_male.wav",
+    "text": "这里填录音里念的原文，必须和录音逐字一致。",
+    "tags": ["沉稳", "男声", "知识科普"],
+    "description": "适合知识讲解、品牌故事"
+  },
+  {
+    "name": "活泼女声",
+    "audio": "voices/lively_female.wav",
+    "text": "这里填录音里念的原文，必须和录音逐字一致。",
+    "tags": ["活泼", "女声", "带货"],
+    "description": "适合好物推荐、直播带货"
+  }
+]
