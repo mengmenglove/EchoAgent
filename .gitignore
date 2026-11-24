@@ -242,3 +242,4 @@ __pycache__/
 server/storage/
 server/voices/
 server/voices.json
+server/echo.db*

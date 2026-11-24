@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.db import get_for_update
 from app.errors import AppError, InsufficientCredits, NotFound
 from app.models import CreditLedger, Job, JobMode, RedeemCode, User
 from app.tts.chunker import estimate_seconds
@@ -42,9 +43,8 @@ async def _locked_user(db: AsyncSession, user_id: uuid.UUID) -> User:
     用 FOR NO KEY UPDATE 而不是 FOR UPDATE：插入 jobs / credit_ledger 时，外键会对 users 行加
     KEY SHARE 锁；FOR UPDATE 与 KEY SHARE 冲突，两个并发事务会互相等待而死锁（tests/test_billing.py
     能复现）。我们只改余额不改主键，NO KEY UPDATE 足够，它之间仍然互斥，扣费照样串行。
-    populate_existing 保证拿到的是加锁后的最新余额，而不是会话里缓存的旧值。
     """
-    user = await db.get(User, user_id, with_for_update={"key_share": True}, populate_existing=True)
+    user = await get_for_update(db, User, user_id, key_share=True)
     if user is None:
         raise NotFound("用户不存在")
     return user
@@ -89,7 +89,7 @@ async def settle(db: AsyncSession, job: Job) -> None:
 
 
 async def redeem(db: AsyncSession, user: User, code: str) -> int:
-    rc = await db.get(RedeemCode, code.strip().upper(), with_for_update=True, populate_existing=True)
+    rc = await get_for_update(db, RedeemCode, code.strip().upper())
     if rc is None or rc.used_by is not None:
         raise AppError("兑换码无效或已被使用", code="invalid_code")
     rc.used_by = user.id

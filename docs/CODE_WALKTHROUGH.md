@@ -32,33 +32,33 @@
 | uv | `python3.12 -m pip install --user uv`，然后把 `~/Library/Python/3.12/bin` 加进 PATH | Python 依赖管理 |
 | Node.js 22 | 你已有 | |
 | ffmpeg | 你已有（`/usr/local/bin/ffmpeg`） | 转 mp3、响度标准化 |
-| Postgres + Redis | 装 Docker Desktop 后执行 `make deps` | 也可以用 Homebrew 装，见下方说明 |
 | F5-TTS | 你已部署在 `~/Documents/LLMWorkSpace/F5-TTS` | |
 
-> **关于 Homebrew**：我在你机器上试过 `brew install redis`，报了 `openssl@4: undefined method 'manifest_sha256'` 错误，一般是 Homebrew 版本太旧导致的。先运行 `brew update` 再试。实在装不上，用 Docker 最省事。
+**不需要 Redis 和 Postgres**：默认用 SQLite 文件（`server/echo.db`），任务在 API 进程里执行。
 
 ### 1.2 第一次启动
 
 ```bash
-# 1. 依赖服务
-make deps                                   # Postgres + Redis（Docker）
+make setup     # 生成 server/.env（含随机 JWT_SECRET）、装依赖、建表、写入音色
 
-# 2. 后端配置
-cd server
-cp .env.example .env
-# 编辑 .env：至少填 JWT_SECRET（用下面这条命令生成）和 ANTHROPIC_API_KEY
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-uv sync                                     # 安装依赖（按 uv.lock 锁定的版本）
-uv run alembic upgrade head                 # 建表
-uv run python -m app.cli seed-voices        # 写入系统音色（见 1.3）
-cd ..
-
-# 3. 每个服务开一个终端
-make f5                                     # F5-TTS
-make api                                    # http://127.0.0.1:8000/docs
-make worker
-make web                                    # http://localhost:3000
+# 每个服务开一个终端
+make f5        # F5-TTS
+make api       # http://127.0.0.1:8000/docs，任务也在这个进程里执行
+make web       # http://localhost:3000
 ```
+
+### 1.2.1 两种运行模式
+
+| | 默认（本地开发） | 上线 |
+|---|---|---|
+| 数据库 | SQLite 文件 | Postgres：改 `DATABASE_URL` |
+| 任务执行 | API 进程内（`MemoryQueue`） | 独立 Worker（`ArqQueue` + `make worker`） |
+| 进度推送 | SSE 每 0.5 秒查数据库 | Redis pub/sub |
+| 每日次数限制 | 数数据库里当天的任务 | Redis 计数 |
+| 切换方式 | `REDIS_URL` 留空 | 填 `REDIS_URL` |
+| 限制 | API 只能开一个进程 | 可以多进程、多机器 |
+
+业务代码完全一样，区别只在 `main.py` 的 `lifespan` 里创建了哪个队列。这就是把队列抽象成 `JobQueue` 接口的好处。
 
 打开 `http://localhost:3000`，注册账号（送 300 额度），选"我有文案，直接配音"，粘贴一段文字，点击开始，就能看到逐句的合成进度，完成后可以播放和下载。
 
@@ -87,8 +87,8 @@ uv run python -m app.cli stats --days 7                   # 最近 7 天：任�
 ### 1.5 跑测试
 
 ```bash
-cd server && uv run pytest -q          # 51 个测试，约 6 秒，不需要 Postgres/Redis/F5/Claude
-# 在真实 Postgres 上再跑一遍（会额外跑并发扣费测试）：
+cd server && uv run pytest -q          # 63 个测试，约 10 秒，不需要 Postgres/Redis/F5/Claude
+# 在真实 Postgres 上再跑一遍：
 TEST_DATABASE_URL=postgresql+asyncpg://echo:echo@127.0.0.1:5432/echo uv run pytest -q
 ```
 
@@ -183,7 +183,7 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 - **engine** 是全局唯一的连接池，**session** 是一次"工作单元"（一个请求或一个任务用一个 session）
 - `expire_on_commit=False`：默认情况下，commit 后对象的所有属性都会"过期"，下次访问时重新查询数据库。在异步模式下，这种隐式查询会直接报错（`MissingGreenlet`），所以必须关掉
-- SQLite 分支：测试时使用。`StaticPool` 让所有连接共用同一个内存数据库；`PRAGMA foreign_keys=ON` 是因为 SQLite **默认不执行外键约束**，不打开的话，级联删除在测试里就测不出问题
+- SQLite 分支：本地开发和测试使用。文件库每个会话用自己的连接（内存库才用 `StaticPool` 共用一个连接），`WAL` 模式让读写互不阻塞；`PRAGMA foreign_keys=ON` 是因为 SQLite **默认不执行外键约束**，不打开的话，级联删除在测试里就测不出问题
 
 ### 4.3 `app/models.py`：数据表
 
@@ -197,7 +197,7 @@ BigIntPK = BigInteger().with_variant(Integer(), "sqlite")
 - `with_variant` 的意思是：默认用前一个类型，遇到某种数据库时换成后一个。生产环境用 Postgres 的 JSONB（可以建索引、查询更快），测试用 SQLite 的 JSON
 - SQLite 只有 `INTEGER PRIMARY KEY` 才会自增，`BIGINT` 不行，所以要单独处理
 
-**时间戳为什么由 Python 生成**（`models.py:34`）：
+**时间戳为什么由 Python 生成**（`models.py:51`）：
 
 ```python
 def utcnow_col(*, onupdate: bool = False, **kw):
@@ -292,7 +292,7 @@ stmt.where((Job.created_at < ts) | ((Job.created_at == ts) & (Job.id < jid)))
 - 为什么要 `(created_at, id)` 两个字段：时间戳可能相同，加上 id 才能保证唯一的顺序
 - `limit + 1`：多取一条，用来判断还有没有下一页，省掉一次 `COUNT` 查询
 
-**创建任务的事务顺序**（`jobs.py:118`）是第 3 节流程图里的关键一步：
+**创建任务的事务顺序**（`jobs.py:123`）是第 3 节流程图里的关键一步：
 1. `db.add(job)` + `flush()`：把 INSERT 发给数据库但不提交，这样后面写账本时外键能引用到这条任务
 2. `billing.hold()`：在**同一个事务**里扣额度
 3. `events.emit()`：内部会 commit，任务、扣费、事件三者一起生效，要么全部成功，要么全部不生效
@@ -302,10 +302,10 @@ stmt.where((Job.created_at < ts) | ((Job.created_at == ts) & (Job.id < jid)))
 
 规则：预扣（hold）→ 成功后结算（release 再 charge），失败或取消时只做 release。每个函数都是**幂等**的，比如 `release` 开头会检查 `credits_held <= 0`，已经退过就不会重复退。
 
-**`_locked_user` 的行锁**（`billing.py:39`）是这个项目里最有意思的 bug，详见第 9 节第 3 条：
+**`_locked_user` 的行锁**（`billing.py:40`）是这个项目里最有意思的 bug，详见第 9 节第 3 条：
 
 ```python
-user = await db.get(User, user_id, with_for_update={"key_share": True}, populate_existing=True)
+user = await get_for_update(db, User, user_id, key_share=True)   # db.py 里的封装
 ```
 
 - `with_for_update`：生成 `SELECT ... FOR NO KEY UPDATE`，锁住这一行，其他事务想改它就得等着，扣费就变成了串行执行，余额不会被扣成负数
@@ -324,6 +324,20 @@ await self.pool.enqueue_job("run_job", job_id, _job_id=f"{job_id}:{attempt}")
 
 为什么要包一层 `JobQueue` 接口：测试里换成 `FakeQueue`，它只记录入队了什么，测试再手动调用流水线来"模拟 Worker"。这样测试就不需要真的 Redis 和 Worker 进程。
 
+### 4.8.1 `app/services/memory_queue.py`：不用 Redis 的队列
+
+一个 `asyncio.Queue` 加一个后台协程，一次跑一个任务，正好符合 F5 只能串行的限制。要点：
+
+- **重启不丢任务**：队列在内存里，但任务状态在数据库里。启动时 `_recover()` 把没做完的任务重新入队，已合成的句子命中缓存
+- **重试不堵队列**：临时错误用 `call_later` 到点再放回队列，等待期间后面的任务照常执行
+- **超时**：`asyncio.timeout` 到点取消任务，标记失败并退款
+- **停止**：`CancelledError` 不是 `Exception` 的子类，不会被流水线的 `except Exception` 当成失败，任务保持未完成状态，下次启动接着做
+- 执行和重试的规则在 `services/runner.py`，和 arq Worker 共用
+
+### 4.8.2 SQLite 没有行锁怎么办
+
+`db.py` 的 `get_for_update()`：Postgres 上是 `SELECT ... FOR UPDATE`；SQLite 会忽略它，所以先执行一条不改任何数据的 `UPDATE` 拿到整库写锁。代价是**写事务必须短**，所以流水线在等模型、等 F5 之前都会先 `commit`。
+
 ### 4.9 `app/services/events.py`：进度事件
 
 ```python
@@ -341,7 +355,7 @@ async def emit(db, redis, job_id, type_, payload):
 
 这个文件是整个后端的"总调度"，请对照第 3 节流程图的第 ⑤ 步来读。
 
-**异常处理的分层**（`pipeline.py:63` 的 `run()`）：
+**异常处理的分层**（`pipeline.py:64` 的 `run()`）：
 
 | 异常 | 处理方式 | 例子 |
 |---|---|---|
@@ -365,6 +379,7 @@ class WorkerSettings:
     max_tries = 2
 ```
 
+- 配了 `REDIS_URL` 才需要这个进程；没配时启动会直接提示并退出
 - `on_startup` 里创建的 httpx 客户端、TTS、LLM 客户端等放进 `ctx`，所有任务共用，连接池可以复用
 - `ctx["redis"]` 是 arq 自带的 Redis 连接，直接拿来 publish 进度
 - **重试**：`TransientError` 且次数没用完时，`raise Retry(defer=15 * tries)`，第 1 次失败 15 秒后重试、第 2 次 30 秒后，这叫**退避**：如果是服务过载，马上重试只会让情况更糟。次数用完就标记失败并退款
@@ -380,7 +395,7 @@ class WorkerSettings:
 
 ### 4.13 `app/api/jobs.py`：接口，重点是 SSE
 
-**SSE 端点**（`jobs.py:70`）是最需要仔细看的接口：
+**SSE 端点**（`jobs.py:73`）是最需要仔细看的接口：
 
 ```python
 async def stream():
@@ -586,7 +601,7 @@ def concat(parts):  # [(wav_bytes, pause_ms)]
 - `_ffmpeg()` 用**参数列表**调用子进程，不拼接 shell 命令字符串，可以防止命令注入；用 `pipe:0` 和 `pipe:1` 在内存中输入输出，不写临时文件
 - `loudnorm`：把整段音频的响度标准化到 -16 LUFS（短视频平台常用的标准），避免句子之间音量忽大忽小
 
-### 6.4 合成缓存（`pipeline.py:142`）
+### 6.4 合成缓存（`pipeline.py:144`）
 
 ```python
 raw = f"{text}|{voice_id}|{speed:.2f}|{provider}|{settings.tts_model_version}"
@@ -705,7 +720,7 @@ const activeIndex = job?.spans?.findIndex(([s, e]) => currentMs >= s && currentM
 
 | 真实依赖 | 测试中的替代 |
 |---|---|
-| Postgres | 内存 SQLite（设置 `TEST_DATABASE_URL` 可以切换成真实 Postgres） |
+| Postgres | 临时文件 SQLite（设置 `TEST_DATABASE_URL` 可以切换成真实 Postgres） |
 | Redis | `fakeredis`（支持 publish/subscribe、incr） |
 | arq + Worker 进程 | `FakeQueue` + `run_worker()` 辅助函数，在测试里同步执行流水线 |
 | F5 | `MockProvider`（生成提示音，并记录合成了哪些文本） |
@@ -746,9 +761,9 @@ FakeLLM 模仿 SDK 的调用方式（`client.beta.messages.create(...)`），按
 
 ### 8.4 并发扣费测试（`tests/test_billing.py`）
 
-8 个协程同时从 30 额度里各扣 10，断言**恰好有 3 个成功**、余额为 0、账本合计正好是 -30。这个测试只在 Postgres 上运行（SQLite 的锁机制完全不同），也正是它发现了第 9 节第 3 条的死锁。
+8 个协程同时从 30 额度里各扣 10，断言**恰好有 3 个成功**、余额为 0、账本合计正好是 -30。SQLite 和 Postgres 上都会跑；在 Postgres 上，正是它发现了第 9 节第 3 条的死锁。
 
-### 8.5 这次实际运行的结果
+### 8.5 第一版实际运行的结果（当时还依赖 Redis）
 
 - SQLite：50 个通过，1 个跳过（并发测试）
 - 真实 Postgres 16：51 个全部通过，数据库迁移和模型定义一致（`alembic check` 通过）

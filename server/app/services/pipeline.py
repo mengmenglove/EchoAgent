@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.loop import AgentError, NeedsInput, run_agent
 from app.config import settings
+from app.db import get_for_update
 from app.errors import JobCanceled, TransientError
 from app.models import TERMINAL_STATUSES, Job, JobMode, JobStatus, TTSCache, User, Voice
 from app.services import billing, events
@@ -51,7 +52,7 @@ class Deps:
 
 async def _lock_job(db: AsyncSession, job_id: uuid.UUID) -> Job | None:
     """重新读取并锁住任务行：拿到最新状态（可能已被用户取消），避免和 API 并发修改冲突。"""
-    return await db.get(Job, job_id, with_for_update=True, populate_existing=True)
+    return await get_for_update(db, Job, job_id)
 
 
 async def _ensure_not_canceled(db: AsyncSession, job_id: uuid.UUID) -> None:
@@ -65,6 +66,7 @@ async def run(db: AsyncSession, job_id: str, deps: Deps) -> None:
     job = await _lock_job(db, jid)
     if job is None or job.status in TERMINAL_STATUSES or job.status == S.needs_input:
         return  # 幂等：已结束、已删除、或在等用户回答
+    await db.commit()  # 立刻放锁：后面要等模型和 F5 很久，不能一直锁着
 
     async def emit(type_: str, payload: dict) -> None:
         await events.emit(db, deps.redis, job.id, type_, payload)
@@ -171,6 +173,7 @@ async def _synthesize(db: AsyncSession, job: Job, deps: Deps, emit) -> tuple[lis
         raise AgentError("文案为空")
     # 分句结果写回 script，前端逐句展示、字幕都以它为准
     job.script = [c.as_dict() for c in chunks]
+    await db.commit()  # 合成一句要好几秒，先提交，别让写事务一直开着挡住其他请求
 
     wav_parts: list[tuple[bytes, int]] = []
     for i, c in enumerate(chunks):

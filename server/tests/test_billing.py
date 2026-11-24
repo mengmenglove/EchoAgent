@@ -1,23 +1,14 @@
-"""额度并发测试。SELECT ... FOR UPDATE 行锁只有 Postgres 才真正生效，所以只在 Postgres 上跑：
-
-TEST_DATABASE_URL=postgresql+asyncpg://... uv run pytest tests/test_billing.py
-"""
+"""额度并发测试：SQLite（整库写锁）和 Postgres（行锁）上都必须成立。"""
 
 import asyncio
 import uuid
 
-import pytest
 from sqlalchemy import func, select
 
-from app.config import settings
 from app.db import SessionLocal
 from app.errors import InsufficientCredits
 from app.models import CreditLedger, Job, User
 from app.services import billing
-
-pytestmark = pytest.mark.skipif(
-    not settings.database_url.startswith("postgresql"), reason="行锁需要 Postgres（设置 TEST_DATABASE_URL）"
-)
 
 
 async def test_concurrent_holds_never_go_negative():

@@ -19,6 +19,9 @@ from app.services import jobs as job_service
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
+POLL_SECONDS = 0.5  # 没有 Redis 时，SSE 每隔多久查一次新事件
+PING_SECONDS = 15
+
 
 def _deps(request: Request):
     s = request.app.state
@@ -73,6 +76,8 @@ async def job_events(job_id: uuid.UUID, request: Request, user: User = Depends(c
     顺序很重要：先订阅 Redis，再从数据库回放历史，最后转发实时消息，按事件 id 去重。
     如果先回放再订阅，两步之间产生的事件就会丢失。
 
+    没配 Redis 时更简单：每 0.5 秒查一次数据库里的新事件。事件本来就全部落库，所以不会丢。
+
     这里不用 Depends(get_db)：SSE 是长连接，依赖注入的会话会一直占着连接池。
     改为需要时临时开一个会话，用完立刻关。
     """
@@ -100,10 +105,26 @@ async def job_events(job_id: uuid.UUID, request: Request, user: User = Depends(c
                 yield _sse(events.event_dict(ev))
                 if ev.type in events.FINAL_EVENTS:
                     return
-            if finished or pubsub is None:
+            if finished:
+                return
+            if pubsub is None:
+                idle = 0.0
+                while not await request.is_disconnected():
+                    async with SessionLocal() as db:
+                        new = await events.events_after(db, job_id, sent)
+                    for ev in new:
+                        sent = ev.id
+                        yield _sse(events.event_dict(ev))
+                        if ev.type in events.FINAL_EVENTS:
+                            return
+                    idle = 0.0 if new else idle + POLL_SECONDS
+                    if idle >= PING_SECONDS:
+                        idle = 0.0
+                        yield ": ping\n\n"
+                    await asyncio.sleep(POLL_SECONDS)
                 return
             while not await request.is_disconnected():
-                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15)
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=PING_SECONDS)
                 if msg is None:
                     yield ": ping\n\n"  # 心跳注释行，防止代理因空闲断开连接
                     continue

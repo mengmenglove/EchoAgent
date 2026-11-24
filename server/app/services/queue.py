@@ -1,4 +1,9 @@
-"""任务入队的薄封装。API 只依赖这个接口，测试时换成 FakeQueue。"""
+"""任务入队的薄封装。API 只依赖 JobQueue 接口，具体实现由配置决定：
+
+- 没配 REDIS_URL：MemoryQueue（memory_queue.py），任务在 API 进程里执行，不需要 Redis 和单独的 Worker
+- 配了 REDIS_URL：ArqQueue，任务交给独立的 Worker 进程（app/worker.py）
+- 测试：FakeQueue，只记录入队了什么
+"""
 
 from typing import Protocol
 

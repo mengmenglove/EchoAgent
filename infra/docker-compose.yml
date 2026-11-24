@@ -1,4 +1,4 @@
-# 本地开发依赖：Postgres + Redis（+ 可选 MinIO）。
+# 可选依赖：Postgres + Redis（+ MinIO）。默认配置用 SQLite、不用 Redis，不需要启动它们。
 #   docker compose -f infra/docker-compose.yml up -d
 # F5-TTS 不放进 Docker：容器里用不了 Apple 芯片的 GPU（MPS），在宿主机原生运行。
 services:

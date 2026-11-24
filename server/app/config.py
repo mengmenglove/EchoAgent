@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVER_DIR = Path(__file__).resolve().parent.parent
@@ -14,7 +14,8 @@ class Settings(BaseSettings):
 
     env: str = "dev"  # dev | prod
     database_url: str = "postgresql+asyncpg://echo:echo@127.0.0.1:5432/echo"
-    redis_url: str = "redis://127.0.0.1:6379/0"
+    # 留空 = 不用 Redis：任务在 API 进程里执行，进度从数据库读。上线要多进程时再配 redis://127.0.0.1:6379/0
+    redis_url: str = ""
     cors_origins: list[str] = []
 
     # 认证。没有默认值：没配置就启动失败，避免用弱密钥上线。
@@ -56,6 +57,13 @@ class Settings(BaseSettings):
     # Worker
     job_timeout_seconds: int = 15 * 60
     job_max_tries: int = 2
+
+    @field_validator("database_url")
+    @classmethod
+    def _anchor_sqlite(cls, v: str) -> str:
+        # SQLite 相对路径固定从 server/ 算起，不管从哪个目录启动都是同一个库
+        prefix = "sqlite+aiosqlite:///./"
+        return f"sqlite+aiosqlite:///{SERVER_DIR}/{v.removeprefix(prefix)}" if v.startswith(prefix) else v
 
     @property
     def is_prod(self) -> bool:

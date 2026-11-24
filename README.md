@@ -10,22 +10,20 @@
 ## 结构
 
 - `web/`：前端（Next.js）
-- `server/`：后端（FastAPI + arq Worker + Claude Agent），调用本地 F5-TTS 服务 `http://127.0.0.1:8765/tts` 合成语音
-- `infra/`：本地开发依赖（Postgres、Redis、MinIO）
+- `server/`：后端（FastAPI + Claude Agent，任务默认在进程内执行，可选 Redis + arq Worker），调用本地 F5-TTS 服务 `http://127.0.0.1:8765/tts` 合成语音
+- `infra/`：可选依赖（Postgres、Redis、MinIO）
 
 ## 本地开发
 
 详细步骤见 [代码解读 · 第 1 节](docs/CODE_WALKTHROUGH.md#1-先把项目跑起来)。简要流程：
 
 ```bash
-make deps                                    # Postgres + Redis（Docker）
-cd server && cp .env.example .env            # 填 JWT_SECRET、ANTHROPIC_API_KEY
-uv sync && uv run alembic upgrade head && uv run python -m app.cli seed-voices
-cd ..
+make setup   # 首次：生成 server/.env、装依赖、建表、写入音色
 make f5      # 终端 1：F5-TTS
 make api     # 终端 2：http://127.0.0.1:8000/docs
-make worker  # 终端 3
-make web     # 终端 4：http://localhost:3000
+make web     # 终端 3：http://localhost:3000
 ```
+
+默认用 SQLite、不用 Redis。需要 Postgres / Redis 时改 `server/.env`，再执行 `make deps` 和 `make worker`。
 
 测试：`cd server && uv run pytest -q`

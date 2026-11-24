@@ -1,7 +1,7 @@
 """测试夹具。
 
 不依赖 Postgres / Redis / F5 / Claude：
-- 数据库：内存 SQLite（模型里用了 with_variant，JSONB 自动退化成 JSON）；
+- 数据库：临时文件 SQLite（模型里用了 with_variant，JSONB 自动退化成 JSON）；
   TEST_DATABASE_URL=postgresql+asyncpg://... 可以换成真实 Postgres
 - Redis：fakeredis（支持 publish/subscribe、incr）
 - 队列：FakeQueue，只记录入队了什么，由测试手动调用 pipeline.run 模拟 Worker
@@ -10,12 +10,17 @@
 """
 
 import os
+import tempfile
+
+_db_dir = tempfile.TemporaryDirectory(prefix="echo-testdb-")
 
 # 必须在导入 app 之前设置，因为 app.config 在导入时就读取配置
 os.environ.update(
     {
-        # 默认内存 SQLite；设置 TEST_DATABASE_URL 可以在真实 Postgres 上跑同一套测试
-        "DATABASE_URL": os.environ.get("TEST_DATABASE_URL", "sqlite+aiosqlite://"),
+        # 默认用临时文件 SQLite（和本地开发一致，每个会话有自己的连接）；
+        # 设置 TEST_DATABASE_URL 可以在真实 Postgres 上跑同一套测试
+        "DATABASE_URL": os.environ.get("TEST_DATABASE_URL", f"sqlite+aiosqlite:///{_db_dir.name}/test.db"),
+        "REDIS_URL": "",
         "JWT_SECRET": "test-secret-0123456789-abcdefghijklmn",
         "TTS_PROVIDER": "mock",
         "STORAGE_BACKEND": "local",
@@ -24,7 +29,6 @@ os.environ.update(
 )
 
 import shutil  # noqa: E402
-import tempfile  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import fakeredis  # noqa: E402

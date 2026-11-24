@@ -6,6 +6,8 @@
 
 ---
 
+> **当前实现**：前期不用 Redis 和 Postgres，默认 SQLite + 进程内队列；文中的 Redis / arq / Postgres 是上线时的架构，改配置即可切换，见[代码解读 1.2.1](CODE_WALKTHROUGH.md#121-两种运行模式)。
+
 ## 目录
 
 1. [产品定义与范围](#1-产品定义与范围)

@@ -17,6 +17,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    TypeDecorator,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -31,12 +32,28 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+class UTCDateTime(TypeDecorator):
+    """带时区的时间。SQLite 不保存时区，读出来补上 UTC；
+    否则接口返回的时间没有时区，浏览器会当成本地时间，显示差 8 小时。"""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return value.astimezone(UTC) if value is not None else None
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
+
+
 def utcnow_col(*, onupdate: bool = False, **kw):
     # 时间戳由 Python 生成（带微秒和时区），而不是数据库的 now()：
     # SQLite 的 now() 只精确到秒，同一秒内创建的任务无法按时间稳定排序，游标分页会出错。
     # server_default 保留，用于直接写 SQL 插入数据的场景。
     return mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         default=_utcnow,
         server_default=func.now(),
         onupdate=_utcnow if onupdate else None,
@@ -94,9 +111,9 @@ class Voice(Base):
     ref_audio_path: Mapped[str | None] = mapped_column(String(512))
     ref_audio_key: Mapped[str | None] = mapped_column(String(512))
     ref_text: Mapped[str] = mapped_column(Text)  # 参考音频里念的原文，必须逐字一致
-    consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 用户声明有权使用该声音
+    consent_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # 用户声明有权使用该声音
     # 软删除：历史任务还引用着这个音色，不能真删
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_at: Mapped[datetime] = utcnow_col()
 
 
@@ -189,7 +206,7 @@ class RedeemCode(Base):
     code: Mapped[str] = mapped_column(String(32), primary_key=True)
     credits: Mapped[int]
     used_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_at: Mapped[datetime] = utcnow_col()
 
 

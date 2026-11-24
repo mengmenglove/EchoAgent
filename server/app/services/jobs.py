@@ -30,7 +30,7 @@ ALLOWED: dict[str, set[str]] = {
     S.writing: {S.needs_input, S.synthesizing, S.failed, S.canceled},
     S.needs_input: {S.queued, S.failed, S.canceled},
     S.synthesizing: {S.verifying, S.succeeded, S.failed, S.canceled},
-    S.verifying: {S.succeeded, S.failed, S.canceled},
+    S.verifying: {S.synthesizing, S.succeeded, S.failed, S.canceled},  # 回到 synthesizing：中断后重跑
     S.succeeded: set(),
     S.failed: set(),
     S.canceled: set(),
@@ -106,8 +106,13 @@ async def _check_limits(db: AsyncSession, redis: Redis | None, user: User) -> No
         n = await redis.incr(key)
         if n == 1:
             await redis.expire(key, 86400)
-        if n > settings.daily_job_limit:
-            raise RateLimited(f"今天已达到 {settings.daily_job_limit} 次上限")
+    else:
+        # 没有 Redis 时直接数数据库。删掉的任务不计入，比 Redis 计数略宽松
+        today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        stmt = select(func.count()).select_from(Job).where(Job.user_id == user.id, Job.created_at >= today)
+        n = (await db.scalar(stmt) or 0) + 1
+    if n > settings.daily_job_limit:
+        raise RateLimited(f"今天已达到 {settings.daily_job_limit} 次上限")
 
 
 def _title_from(text: str) -> str:
