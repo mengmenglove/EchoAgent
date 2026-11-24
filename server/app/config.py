@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # 服务端 fallback（beta）。经过不认识该参数的代理网关时会报 400，可以关掉
     llm_fallbacks: bool = True
 
+    # 聊天（本地 Ollama）。聊天功能只用它，不需要 Claude
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    chat_model: str = "qwen3.5:4b"
+    chat_history_turns: int = 10  # 每次只带最近 10 轮对话，控制速度和显存
+    chat_max_reply_chars: int = 300  # 回复要合成语音，太长会等很久
+
     # 语音合成
     tts_provider: str = "f5"  # f5 | mock
     f5_base_url: str = "http://127.0.0.1:8765"

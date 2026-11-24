@@ -47,6 +47,16 @@ make api       # http://127.0.0.1:8000/docs，任务也在这个进程里执行
 make web       # http://localhost:3000
 ```
 
+### 1.2.2 语音聊天（本地 Qwen3.5-4B）
+
+```bash
+make ollama        # 启动本地大模型服务（后台运行）
+make ollama-pull   # 第一次：下载 Qwen3.5-4B，约 3.4GB
+```
+
+然后打开 `http://localhost:3000/chat`，用中文或英文聊天，回复会自动用 F5 朗读出来。
+所有大模型文件都放在 `~/Documents/LLMWorkSpace/Ollama/`：程序在 `bin/`，模型在 `models/`，日志在 `logs/`。
+
 ### 1.2.1 两种运行模式
 
 | | 默认（本地开发） | 上线 |
@@ -87,7 +97,7 @@ uv run python -m app.cli stats --days 7                   # 最近 7 天：任�
 ### 1.5 跑测试
 
 ```bash
-cd server && uv run pytest -q          # 63 个测试，约 10 秒，不需要 Postgres/Redis/F5/Claude
+cd server && uv run pytest -q          # 78 个测试，约 12 秒，不需要 Postgres/Redis/F5/Claude
 # 在真实 Postgres 上再跑一遍：
 TEST_DATABASE_URL=postgresql+asyncpg://echo:echo@127.0.0.1:5432/echo uv run pytest -q
 ```
@@ -100,7 +110,7 @@ TEST_DATABASE_URL=postgresql+asyncpg://echo:echo@127.0.0.1:5432/echo uv run pyte
 
 | 顺序 | 文件 | 看什么 |
 |---|---|---|
-| 1 | `server/app/models.py` | 7 张表，理解数据长什么样 |
+| 1 | `server/app/models.py` | 9 张表（含聊天的 2 张），理解数据长什么样 |
 | 2 | `server/app/schemas.py` | API 的输入输出 |
 | 3 | `server/app/services/jobs.py` | 状态机、创建任务、追问、取消 |
 | 4 | `server/app/services/billing.py` | 额度账本 |
@@ -425,6 +435,47 @@ async def stream():
 - 生产环境用 S3 时，下载接口返回**预签名 URL** 并重定向过去，音频流量直接从对象存储走，不经过 API 服务器
 
 ---
+
+## 4.15 语音聊天：本地模型 + F5 闭环
+
+和写稿 Agent 是两条独立的功能，聊天只用本地 Ollama，**不需要 Claude**。
+
+| 文件 | 作用 |
+|---|---|
+| `llm/ollama.py` | 调 Ollama 的 `/api/chat`，流式读取回复 |
+| `services/chat.py` | 存消息 → 调模型 → 逐句合成语音 → 拼接 |
+| `api/chat.py` | 会话和消息接口；发消息直接返回一条 SSE 流 |
+| `web/lib/chatStream.ts` | 前端用 fetch 读取 POST 返回的 SSE 流 |
+| `web/app/(app)/chat/page.tsx` | 聊天页面 |
+
+**一条消息的流程**：
+
+```
+POST /api/chat/sessions/{id}/messages  {"text": "Hello"}
+  ├─ event: user_saved      用户消息存库
+  ├─ event: delta × N       Qwen 一边生成一边推（打字机效果）
+  ├─ event: text_done       回复完整，存库
+  ├─ event: audio_progress  每合成完一句推一次（1/5、2/5……）
+  ├─ event: ping            没有进度时每 10 秒一次心跳
+  ├─ event: audio           F5 逐句合成并拼接完成，前端自动播放
+  └─ event: done
+```
+
+**几个设计点**：
+
+1. **为什么用原生 `/api/chat` 而不是 OpenAI 兼容接口**：Qwen3.5 默认会先"思考"再回答，聊天时这段思考只会拖慢速度。关闭它的 `think: false` 参数只有原生接口认，兼容接口会忽略。
+2. **为什么先出文字、再合成语音**：模型生成和 F5 合成都要用 GPU，同时跑会互相拖慢；而且 F5 一次只能合成一句。先出文字，用户马上就能看到回复，体验也好。
+3. **为什么 POST 也能用 SSE**：浏览器自带的 `EventSource` 只支持 GET，所以前端改用 `fetch` 读取响应流，再自己按"空行分隔、`event:` / `data:` 开头"的格式解析（`chatStream.ts`）。
+4. **英文不能套用中文规整规则**：之前的 `normalize()` 会把 "I have 3 cats" 变成 "I have 三 cats"。现在先判断句子里有没有中文字符，没有就只做最基本的清理。分句也补上了英文规则：`.` `!` `?` 后面跟空格才切，这样不会把 `3.5` 切开。
+5. **全进程共用一个 TTS 实例**：配音任务和聊天都要调用 F5，如果各自创建一个 F5 客户端，就各有一把锁，两边会同时去调 F5。现在 `main.py` 只创建一个实例，所有调用方共用。
+6. **系统提示词要求回复短、只用纯文本**：回复要念出来，太长会等很久，Markdown 符号也会被念出来。此外后端最多只合成前 6 句。
+7. **每次只带最近 10 轮对话**（`CHAT_HISTORY_TURNS`），控制速度和显存。
+8. **回复语言跟着用户"这一句"走**：小模型容易跟着历史的语言走（前面聊英文，用户改说中文它还回英文，实测遇到过）。所以每次请求都按用户这句话的语言，在系统提示里写明"Reply in Chinese / English"。
+9. **合成在独立任务里跑**：先启动合成任务，再推送文字。前端任何时候断开，语音都会合成完并存库，回到页面还能播放。
+
+**实测（M3 Pro，Qwen3.5-4B + F5）**：首字约 0.3 秒，一句回复 1～2 秒写完；语音每句约 8～10 秒，5 句的英文回复约 40 秒。
+
+**以后可以加的**：语音输入（用 Whisper 识别你说的话，形成"说话 → 回复 → 朗读"的完整语音对话）、边生成边按句合成（缩短等待时间）、英语陪练专用的提示词（纠错、打分）。
 
 ## 5. Agent：最核心的部分
 
@@ -841,6 +892,13 @@ FakeLLM 模仿 SDK 的调用方式（`client.beta.messages.create(...)`），按
 **原因**：真正的错误发生在 `startup` 里，但 arq 随后会调用 `shutdown`，而 `shutdown` 里写的是 `ctx["http"]`，这个 key 此时还不存在，于是又抛出了一个新错误。
 **解决**：改成 `ctx.get("http")`。
 **记住**：**清理代码要能应对"初始化只做了一半"的情况**，否则真正的错误原因会被掩盖。
+
+### 坑 11：Next.js 代理 30 秒超时，语音"丢了"
+
+**现象**：聊天时文字正常出来，但较长的回复收不到语音，数据库里也没有存下音频。
+**原因**：`next.config.ts` 的 rewrites 转发请求时，代理默认 30 秒超时（`next/dist/server/lib/router-utils/proxy-request.js` 里写死的 `proxyTimeout || 30000`）。F5 合成要 20～40 秒，这期间没有数据往外发，连接被代理断开；连接一断，后端的流式生成器也被取消，合成到一半的语音没来得及存库。
+**解决**：三处一起改。① 后端合成期间每句推一次进度、没进度时每 10 秒推一次心跳；② `experimental.proxyTimeout` 调到 5 分钟；③ 合成放进独立的后台任务，前端断开也会合成完并存库。
+**记住**：**任何"慢操作 + 流式返回"经过代理时都要考虑超时**，Nginx、云负载均衡也有类似的空闲超时（常见 60 秒）。心跳是通用解法。
 
 ### 坑 10：SDK 用的是 `httpx2` 而不是 `httpx`
 

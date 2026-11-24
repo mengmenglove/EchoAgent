@@ -90,6 +90,7 @@ def app(tmp_storage, redis, queue, tts):
     application.state.redis = redis
     application.state.queue = queue
     application.state.tts = tts
+    application.state.chat_llm = None
     return application
 
 

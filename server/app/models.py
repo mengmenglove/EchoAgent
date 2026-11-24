@@ -210,6 +210,39 @@ class RedeemCode(Base):
     created_at: Mapped[datetime] = utcnow_col()
 
 
+class ChatSession(Base):
+    """一段对话。"""
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(64), default="新对话")
+    voice_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("voices.id"))
+    created_at: Mapped[datetime] = utcnow_col(index=True)
+    updated_at: Mapped[datetime] = utcnow_col(onupdate=True)
+
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="session", order_by="ChatMessage.id", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class ChatMessage(Base):
+    """一条消息。assistant 的消息合成语音后，audio_key 指向 wav 文件。"""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    audio_key: Mapped[str | None] = mapped_column(String(512))
+    audio_ms: Mapped[int | None]
+    created_at: Mapped[datetime] = utcnow_col()
+
+    session: Mapped[ChatSession] = relationship(back_populates="messages")
+
+
 class TTSCache(Base):
     """合成缓存：同样的文本 + 音色 + 语速 + 模型，只合成一次。"""
 

@@ -53,13 +53,16 @@ def chunk_text(text: str) -> list[Chunk]:
     chunks: list[Chunk] = []
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n", text) if p.strip()]
     for pi, para in enumerate(paragraphs):
-        sentences = [s.strip() for s in re.split(r"(?<=[。！？!?；;…])", para) if s.strip()]
+        # 中文标点直接切；英文的 . ! ? 后面要跟空格才切，避免把 3.5、e.g. 这类切开
+        sentences = [s.strip() for s in re.split(r"(?<=[。！？；…])|(?<=[.!?;])\s+", para) if s and s.strip()]
         for si, sent in enumerate(sentences):
             is_para_end = si == len(sentences) - 1 and pi < len(paragraphs) - 1
             pause = PAUSE_PARAGRAPH if is_para_end else PAUSE_SENTENCE
             for c in _split_long(sent, pause):
                 if chunks and len(c.text) < MIN_CHARS and len(chunks[-1].text) + len(c.text) <= MAX_CHARS:
-                    chunks[-1] = Chunk(chunks[-1].text + c.text, c.pause_ms)
+                    # 英文合并要补空格（中文不用）
+                    sep = " " if re.search(r"[A-Za-z0-9.!?]$", chunks[-1].text) and c.text[:1].isascii() else ""
+                    chunks[-1] = Chunk(chunks[-1].text + sep + c.text, c.pause_ms)
                 else:
                     chunks.append(c)
     if chunks:

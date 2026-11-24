@@ -12,6 +12,7 @@ from app.errors import TransientError
 from app.llm.client import get_llm
 from app.services import pipeline
 from app.services.storage import make_storage
+from app.tts.base import TTSProvider
 from app.tts.factory import make_tts
 
 log = logging.getLogger("echo.runner")
@@ -22,7 +23,8 @@ def make_http() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=httpx.Timeout(180, connect=5))
 
 
-def build_deps(http: httpx.AsyncClient, redis: Redis | None) -> pipeline.Deps:
+def build_deps(http: httpx.AsyncClient, redis: Redis | None, tts: TTSProvider | None = None) -> pipeline.Deps:
+    """tts 可以传入已有实例：F5 一次只能合成一句，同一进程里所有调用方必须共用一个实例（共用一把锁）。"""
     asr = None
     if settings.verify_enabled:
         from app.tts.verify import make_asr
@@ -30,7 +32,7 @@ def build_deps(http: httpx.AsyncClient, redis: Redis | None) -> pipeline.Deps:
         asr = make_asr()
     deps = pipeline.Deps(
         storage=make_storage(settings),
-        tts=make_tts(settings, http),
+        tts=tts or make_tts(settings, http),
         redis=redis,
         llm=get_llm(),
         asr=asr,

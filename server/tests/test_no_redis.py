@@ -159,7 +159,8 @@ async def test_daily_limit_counts_from_db(user_client, system_voice, monkeypatch
 async def test_health_ok_without_redis(client):
     r = await client.get("/api/health")
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "db": True, "redis": None, "tts": True}
+    body = r.json()
+    assert body["ok"] and body["db"] and body["redis"] is None and body["tts"]
 
 
 async def test_timestamps_carry_timezone(client):

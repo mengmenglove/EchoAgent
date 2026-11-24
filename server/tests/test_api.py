@@ -220,4 +220,5 @@ async def test_lexicon_applied(user_client, system_voice, queue, deps, tts):
 
 async def test_health(client):
     r = await client.get("/api/health")
-    assert r.json() == {"ok": True, "db": True, "redis": True, "tts": True}
+    body = r.json()
+    assert body["ok"] and body["db"] and body["redis"] and body["tts"]

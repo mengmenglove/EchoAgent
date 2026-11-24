@@ -43,3 +43,13 @@ def test_count_units_and_estimate():
     assert count_units("买iPhone 15只要5999") == 2 + 1 + 1 + 1 + 1  # 买、只要 + iPhone + 15 + 5999
     assert estimate_seconds("一" * 42) == 10
     assert estimate_seconds("一" * 42, speed=2) == 5
+
+
+def test_english_sentences():
+    assert [c.text for c in chunk_text("Hi there! Nice to meet you. How are you?")] == [
+        "Hi there!",
+        "Nice to meet you.",
+        "How are you?",
+    ]
+    # 小数点不切；短句并入前一句时补空格
+    assert [c.text for c in chunk_text("It costs 3.5 dollars. OK?")] == ["It costs 3.5 dollars. OK?"]

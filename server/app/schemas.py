@@ -153,3 +153,46 @@ class LedgerOut(BaseModel):
 
 class RedeemIn(BaseModel):
     code: str = Field(min_length=4, max_length=32)
+
+
+# ---------- 聊天 ----------
+
+
+class ChatSessionIn(BaseModel):
+    voice_id: uuid.UUID | None = None  # 不填就用第一个可用音色
+
+
+class ChatSessionPatch(BaseModel):
+    voice_id: uuid.UUID
+
+
+class ChatSessionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str
+    voice_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatMessageIn(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+    speak: bool = True  # 是否把回复合成语音
+
+
+class ChatMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    role: str
+    content: str
+    audio_ms: int | None
+    has_audio: bool = False
+    created_at: datetime
+
+    @classmethod
+    def from_msg(cls, m) -> "ChatMessageOut":
+        out = cls.model_validate(m)
+        out.has_audio = bool(m.audio_key)
+        return out

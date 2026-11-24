@@ -30,3 +30,9 @@ def test_lexicon_overrides_and_is_case_insensitive():
 def test_lexicon_longest_first():
     lex = {"App": "A P P", "AppStore": "苹果商店"}
     assert normalize("去AppStore下载App", lex) == "去苹果商店下载A P P。"
+
+
+def test_english_kept_as_is():
+    assert normalize("I have 3 cats and it costs $25.") == "I have 3 cats and it costs $25."
+    assert normalize("Hello! **Great** question") == "Hello! Great question."
+    assert normalize('" but that\'s okay, you said "I go,"') == "but that's okay, you said I go."

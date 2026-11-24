@@ -15,10 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api import auth, billing, jobs, voices
+from app.api import auth, billing, chat, jobs, voices
 from app.config import settings
 from app.db import SessionLocal
 from app.errors import AppError
+from app.llm.ollama import OllamaChat
 from app.services import runner
 from app.services.memory_queue import MemoryQueue
 from app.services.queue import ArqQueue
@@ -35,7 +36,9 @@ async def lifespan(app: FastAPI):
     logging.getLogger("httpx").setLevel(logging.WARNING)
     http = runner.make_http()
     app.state.storage = make_storage(settings)
-    app.state.tts = make_tts(settings, http)  # 只用来做健康检查
+    # 全进程共用一个 TTS：配音任务和聊天都用它，F5 的锁才能真正串行
+    app.state.tts = make_tts(settings, http)
+    app.state.chat_llm = OllamaChat(http, settings.ollama_base_url, settings.chat_model)
     if settings.redis_url:
         pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
         app.state.redis = pool  # ArqRedis 本身就是 redis.asyncio.Redis，可以 publish/subscribe
@@ -45,7 +48,7 @@ async def lifespan(app: FastAPI):
     else:
         # 不用 Redis：任务就在本进程里执行
         app.state.redis = None
-        app.state.queue = MemoryQueue(runner.build_deps(http, None))
+        app.state.queue = MemoryQueue(runner.build_deps(http, None, app.state.tts))
         await app.state.queue.start()
         yield
         await app.state.queue.stop()
@@ -83,7 +86,12 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     async def health(request: Request):
         # redis 为 None 表示没启用，不影响整体状态
         redis = request.app.state.redis
-        result: dict[str, bool | None] = {"db": False, "redis": None if redis is None else False, "tts": False}
+        result: dict[str, bool | None] = {
+            "db": False,
+            "redis": None if redis is None else False,
+            "tts": False,
+            "chat_llm": False,
+        }
         try:
             async with SessionLocal() as db:
                 await db.execute(text("SELECT 1"))
@@ -99,10 +107,15 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
             result["tts"] = await request.app.state.tts.health()
         except Exception as e:
             log.warning("health tts: %s", e)
-        ok = all(v is not False for v in result.values())
+        try:
+            result["chat_llm"] = await request.app.state.chat_llm.health()
+        except Exception as e:
+            log.warning("health chat_llm: %s", e)
+        # 聊天模型没就绪不影响配音功能，所以不计入整体状态
+        ok = all(v is not False for k, v in result.items() if k != "chat_llm")
         return JSONResponse(status_code=200 if ok else 503, content={"ok": ok, **result})
 
-    for r in (auth.router, voices.router, jobs.router, billing.router):
+    for r in (auth.router, voices.router, jobs.router, billing.router, chat.router):
         app.include_router(r)
     return app
 

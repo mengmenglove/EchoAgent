@@ -67,8 +67,28 @@ def apply_lexicon(text: str, lexicon: dict[str, str] | None) -> str:
     return text
 
 
+_CJK = re.compile(r"[一-鿿]")
+
+
+def is_chinese(text: str) -> bool:
+    return bool(_CJK.search(text))
+
+
+def normalize_english(text: str) -> str:
+    """英文句子：中文规则（数字转汉字、加中文句号）不能用，只做最基本的清理。
+    F5 能直接读英文数字，"$25" 这种符号读法交给模型自己。"""
+    text = re.sub(r"[*#`_]+", "", text)  # 去掉 Markdown 符号，免得念出来
+    text = re.sub(r"[\"“”]", "", text)  # 引号不用念；长句在引号里的逗号处切开时，还会留下半边引号
+    text = re.sub(r"\s+", " ", text).strip().rstrip(",;: ")
+    if text and text[-1] not in ".!?":
+        text += "."
+    return text
+
+
 def normalize(text: str, lexicon: dict[str, str] | None = None) -> str:
     text = apply_lexicon(text, lexicon)
+    if not is_chinese(text):
+        return normalize_english(text)
     text = text.translate(_PUNCT_MAP)
 
     # 价格：¥99 / ￥99.9 → 99元（符号在前的读成"元"）

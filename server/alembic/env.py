@@ -57,8 +57,19 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _render_item(type_, obj, autogen_context):
+    # 自定义类型 UTCDateTime 在库里就是带时区的 DateTime，迁移脚本里写成标准类型，免得要 import app.models
+    from app.models import UTCDateTime
+
+    if type_ == "type" and isinstance(obj, UTCDateTime):
+        return "sa.DateTime(timezone=True)"
+    return False
+
+
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection, target_metadata=target_metadata, compare_type=True, render_item=_render_item
+    )
 
     with context.begin_transaction():
         context.run_migrations()

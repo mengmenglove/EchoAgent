@@ -8,6 +8,7 @@ import { useMe } from "@/lib/hooks";
 
 const LINKS = [
   { href: "/studio", label: "创作" },
+  { href: "/chat", label: "聊天" },
   { href: "/history", label: "历史" },
   { href: "/account", label: "账户" },
 ];

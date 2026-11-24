@@ -81,3 +81,20 @@ export type LedgerEntry = {
   note: string;
   created_at: string;
 };
+
+export type ChatSession = {
+  id: string;
+  title: string;
+  voice_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatMessage = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  audio_ms: number | null;
+  has_audio: boolean;
+  created_at: string;
+};
