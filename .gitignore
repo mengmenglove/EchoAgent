@@ -243,3 +243,4 @@ server/storage/
 server/voices/
 server/voices.json
 server/echo.db*
+logs/

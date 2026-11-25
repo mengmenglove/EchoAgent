@@ -8,7 +8,13 @@ OLLAMA := $(OLLAMA_HOME)/bin/ollama
 CHAT_MODEL ?= qwen3.5:4b
 export OLLAMA_MODELS := $(OLLAMA_HOME)/models
 
-.PHONY: stop status setup deps ollama ollama-stop ollama-pull f5 f5-stop migrate seed api worker web test lint
+.PHONY: start stop status doctor setup deps ollama ollama-stop ollama-pull f5 f5-stop migrate seed api worker web test lint
+
+doctor:          ## 检查依赖是否装齐，缺什么提示看 docs/INSTALL.md 哪一节
+	@./scripts/doctor.sh
+
+start:           ## 后台启动全部服务（ollama、f5、api、web），日志在 logs/
+	@./scripts/start.sh
 
 stop:            ## 关闭全部本地服务（web、api、f5、ollama）。只关部分：./scripts/stop.sh web api
 	@./scripts/stop.sh
@@ -37,11 +43,11 @@ ollama-stop:
 ollama-pull:     ## 下载聊天模型（约 3.4GB，只需一次）
 	$(OLLAMA) pull $(CHAT_MODEL)
 
-f5:              ## 启动本地 F5-TTS 服务
-	$(F5_HOME)/tts-server-action.sh start
+f5:              ## 启动本地 F5-TTS 服务（后台运行）
+	@F5_HOME=$(F5_HOME) ./infra/f5/f5.sh start
 
 f5-stop:
-	$(F5_HOME)/tts-server-action.sh stop
+	@F5_HOME=$(F5_HOME) ./infra/f5/f5.sh stop
 
 migrate:         ## 数据库迁移到最新
 	cd server && uv run alembic upgrade head

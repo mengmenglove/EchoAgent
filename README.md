@@ -4,6 +4,7 @@
 
 ## 文档
 
+- [**安装说明**](docs/INSTALL.md)：从一台新 Mac 开始，装齐 Python、Node、ffmpeg、F5-TTS、Ollama 等全部依赖
 - [开发文档与实施计划](docs/DEVELOPMENT_PLAN.md)：架构、数据模型、API、Agent、TTS、计费、部署、里程碑和关键库详解
 - [代码解读](docs/CODE_WALKTHROUGH.md)：逐文件讲解实现、请求的完整旅程、踩过的坑、动手练习
 
@@ -15,7 +16,15 @@
 
 ## 本地开发
 
-详细步骤见 [代码解读 · 第 1 节](docs/CODE_WALKTHROUGH.md#1-先把项目跑起来)。简要流程：
+第一次安装请看 [docs/INSTALL.md](docs/INSTALL.md)。装好后：
+
+```bash
+make doctor   # 检查依赖是否齐全
+make start    # 后台启动全部服务，打开 http://localhost:3000
+make stop     # 不用时关闭
+```
+
+也可以分开启动：
 
 ```bash
 make setup   # 首次：生成 server/.env、装依赖、建表、写入音色

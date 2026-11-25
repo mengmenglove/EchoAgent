@@ -26,6 +26,8 @@
 
 ### 1.1 准备依赖
 
+> 完整的安装步骤（包括 F5-TTS、Ollama 从零安装）见 [INSTALL.md](INSTALL.md)。本节只是简表。
+
 | 依赖 | 怎么装 | 说明 |
 |---|---|---|
 | Python 3.12（arm64） | 你已有：`/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12` | |

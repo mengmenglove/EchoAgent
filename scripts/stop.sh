@@ -13,7 +13,7 @@ OLLAMA_HOME="${OLLAMA_HOME:-$HOME/Documents/LLMWorkSpace/Ollama}"
 SERVICES=(
   "web    3000  next-server|bin/next"
   "api    8000  uvicorn app\.main:app|multiprocessing"
-  "f5     8765  tts_server\.py"
+  "f5     8765  f5_server\.py|tts_server\.py"
   "ollama 11434 ollama serve"
 )
 
@@ -49,7 +49,7 @@ stop_one() {
   if [ -z "$pids" ]; then echo "  ${name}：没有在运行"; return; fi
 
   # F5 和 Ollama 优先用它们自己的停止方式（会顺便清理 pid 文件）
-  if [ "${name}" = f5 ] && [ -x "$F5_HOME/tts-server-action.sh" ]; then "$F5_HOME/tts-server-action.sh" stop >/dev/null 2>&1; fi
+  if [ "${name}" = f5 ]; then F5_HOME="$F5_HOME" "$(dirname "$0")/../infra/f5/f5.sh" stop >/dev/null 2>&1; fi
   if [ "${name}" = ollama ] && [ -f "$OLLAMA_HOME/ollama.pid" ]; then
     kill "$(cat "$OLLAMA_HOME/ollama.pid")" 2>/dev/null; rm -f "$OLLAMA_HOME/ollama.pid"
   fi
