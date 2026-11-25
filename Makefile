@@ -8,7 +8,13 @@ OLLAMA := $(OLLAMA_HOME)/bin/ollama
 CHAT_MODEL ?= qwen3.5:4b
 export OLLAMA_MODELS := $(OLLAMA_HOME)/models
 
-.PHONY: setup deps ollama ollama-stop ollama-pull f5 f5-stop migrate seed api worker web test lint
+.PHONY: stop status setup deps ollama ollama-stop ollama-pull f5 f5-stop migrate seed api worker web test lint
+
+stop:            ## 关闭全部本地服务（web、api、f5、ollama）。只关部分：./scripts/stop.sh web api
+	@./scripts/stop.sh
+
+status:          ## 查看各服务是否在运行
+	@./scripts/stop.sh status
 
 setup:           ## 首次准备：生成 server/.env、装依赖、建表、写入音色（可重复执行）
 	@test -f server/.env || { sed "s|^JWT_SECRET=$$|JWT_SECRET=$$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')|" server/.env.example > server/.env && chmod 600 server/.env && echo "已生成 server/.env"; }

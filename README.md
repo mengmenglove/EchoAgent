@@ -25,6 +25,10 @@ make web     # 终端 3：http://localhost:3000
 
 # 语音聊天（本地 Qwen3.5-4B + F5）：
 make ollama && make ollama-pull   # 第一次下载约 3.4GB，之后只需 make ollama
+
+# 不用的时候
+make stop     # 关闭全部服务（web、api、f5、ollama）
+make status   # 查看哪些在运行
 ```
 
 默认用 SQLite、不用 Redis。需要 Postgres / Redis 时改 `server/.env`，再执行 `make deps` 和 `make worker`。
