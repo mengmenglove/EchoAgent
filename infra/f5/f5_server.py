@@ -89,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
                 with open(tmp.name, "rb") as f:
                     data = f.read()
             self._send(200, data, "audio/wav")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  返回 500 而不是让请求线程崩掉
             traceback.print_exc()
             self._send(500, f"error: {e}".encode())
 
